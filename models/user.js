@@ -29,6 +29,12 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
 
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+
     managerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
