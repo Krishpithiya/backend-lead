@@ -1,4 +1,5 @@
 const Lead = require("../models/lead.model");
+const { dateError } = require("../utils/dateValidation");
 
 exports.createLead = async (req, res) => {
   try {
@@ -81,6 +82,7 @@ exports.createLead = async (req, res) => {
 exports.getLeads = async (req, res) => {
   try {
     let query = {};
+    const { agentId } = req.query;
 
     if (req.user.role === "manager") {
       query = {
@@ -97,6 +99,10 @@ exports.getLeads = async (req, res) => {
         success: false,
         message: "Unauthorized role",
       });
+    }
+
+    if (agentId) {
+      query.assignedAgent = agentId;
     }
 
     const leads = await Lead.find(query)
@@ -123,7 +129,9 @@ exports.getLeadById = async (req, res) => {
     const lead = await Lead.findById(req.params.id)
       .populate("assignedManager", "name email")
       .populate("assignedAgent", "name email")
-      .populate("timeline.addedBy", "name");
+      .populate("notes.addedBy", "name role")
+      .populate("createdBy", "name role")
+      .populate("timeline.addedBy", "name role");
 
     if (!lead) {
       return res.status(404).json({
@@ -220,6 +228,10 @@ exports.updateLead = async (req, res) => {
       ];
     } else if (userRole === "manager") {
       allowedUpdates = [
+        "name",
+        "email",
+        "phone",
+        "source",
         "status",
         "assignedAgent",
         "reassignmentRequested",
@@ -253,7 +265,10 @@ exports.updateLead = async (req, res) => {
       });
     }
 
-    if (req.body.assignedAgent && oldAgent?.toString() !== req.body.assignedAgent) {
+    if (
+      req.body.assignedAgent &&
+      oldAgent?.toString() !== req.body.assignedAgent
+    ) {
       lead.timeline.push({
         type: "assigned",
         message: "Lead assigned to new agent",
@@ -314,6 +329,10 @@ exports.updateLead = async (req, res) => {
 
     // Append new follow-ups
     if (Array.isArray(req.body.newFollowUps)) {
+      const invalidFollowUp = req.body.newFollowUps
+        .map((f) => dateError(f.date, "Follow-up date"))
+        .find(Boolean);
+      if (invalidFollowUp) return res.status(400).json({ success: false, message: invalidFollowUp });
       req.body.newFollowUps.forEach((f) => {
         lead.followUps.push({
           date: f.date,
@@ -332,6 +351,10 @@ exports.updateLead = async (req, res) => {
 
     // Append new meetings
     if (Array.isArray(req.body.newMeetings)) {
+      const invalidMeeting = req.body.newMeetings
+        .map((m) => dateError(m.date, "Meeting date"))
+        .find(Boolean);
+      if (invalidMeeting) return res.status(400).json({ success: false, message: invalidMeeting });
       req.body.newMeetings.forEach((m) => {
         lead.meetings.push({
           title: m.title,
@@ -393,10 +416,14 @@ exports.addFollowUp = async (req, res) => {
   try {
     const { id } = req.params;
     const { date, note } = req.body;
+    const invalidDate = dateError(date, "Follow-up date");
+    if (invalidDate) return res.status(400).json({ success: false, message: invalidDate });
 
     const lead = await Lead.findById(id);
     if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lead not found" });
     }
 
     lead.followUps.push({
@@ -427,7 +454,9 @@ exports.addCallLog = async (req, res) => {
 
     const lead = await Lead.findById(id);
     if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lead not found" });
     }
 
     lead.callLogs.push({
@@ -457,10 +486,14 @@ exports.addMeeting = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, date, location, description } = req.body;
+    const invalidDate = dateError(date, "Meeting date");
+    if (invalidDate) return res.status(400).json({ success: false, message: invalidDate });
 
     const lead = await Lead.findById(id);
     if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lead not found" });
     }
 
     if (!lead.meetings) lead.meetings = [];
@@ -494,11 +527,15 @@ exports.uploadFile = async (req, res) => {
 
     const lead = await Lead.findById(id);
     if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lead not found" });
     }
 
     if (!file) {
-      return res.status(400).json({ success: false, message: "File is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "File is required" });
     }
 
     lead.attachments.push({
@@ -531,7 +568,9 @@ exports.getFilteredTimeline = async (req, res) => {
     const lead = await Lead.findById(id).populate("timeline.addedBy", "name");
 
     if (!lead) {
-      return res.status(404).json({ success: false, message: "Lead not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lead not found" });
     }
 
     let timeline = lead.timeline;

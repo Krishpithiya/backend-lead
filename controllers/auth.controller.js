@@ -128,8 +128,30 @@
       { expiresIn: "7d" }
     );
 
-    user.refreshToken = refreshToken;
-    await user.save();
+    const lastLoginIp =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket?.remoteAddress ||
+      "";
+
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          refreshToken,
+          lastLoginAt: new Date(),
+          lastLoginIp,
+          activeDevices: [
+            ...(user.activeDevices || []).slice(-4),
+            {
+              device: req.headers["user-agent"] || "Unknown device",
+              browser: req.headers["user-agent"] || "Unknown browser",
+              ipAddress: lastLoginIp,
+              lastActiveAt: new Date(),
+            },
+          ],
+        },
+      },
+    );
 
     // ✅ ✅ FIXED RESPONSE (IMPORTANT)
     res.json({
@@ -151,60 +173,6 @@
     });
   }
 };
-
-  // exports.login = async (req, res) => {
-  //   try {
-  //     const { email, password } = req.body;
-
-  //     const user = await User.findOne({ email });
-
-  //     if (!user) {
-  //       return res.status(400).json({
-  //         message: "User not found"
-  //       });
-  //     }
-
-  //     const isMatch = await bcrypt.compare(
-  //       password,
-  //       user.password
-  //     );
-
-  //     if (!isMatch) {
-  //       return res.status(400).json({
-  //         message: "Invalid password"
-  //       });
-  //     }
-
-  //     const accessToken = jwt.sign({
-  //       id: user._id,
-  //       role: user.role
-  //     }, process.env.JWT_SECRET, {
-  //       expiresIn: "15m"
-  //     });
-
-  //     const refreshToken = jwt.sign({
-  //       id: user._id,
-  //       role: user.role
-  //     }, process.env.JWT_REFRESH_SECRET, {
-  //       expiresIn: "7d"
-  //     });
-
-  //     user.refreshToken = refreshToken;
-  //     await user.save();
-
-  //     res.json({
-  //       message: "Login successful",
-  //       accessToken,
-  //       refreshToken,
-  //       role: user.role
-  //     });
-
-  //   } catch (err) {
-  //     res.status(500).json({
-  //       error: err.message
-  //     });
-  //   }
-  // };
 
   exports.refreshToken = async (req, res) => {
     try {
@@ -291,7 +259,7 @@
     try{
       const { email } = req.body;
 
-      const user = await User.findOne({ email});
+      const user = await User.findOne({ email }).select("_id email");
 
       if(!user){
 
@@ -301,11 +269,15 @@
       }
       const resetToken = Math.random().toString(36).substring(2, 12);
 
-      user.resetPasswordToken = resetToken;
-
-      user.resetPasswordExpires = Date.now() + 15*60*1000;
-
-      await user.save();
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            resetPasswordToken: resetToken,
+            resetPasswordExpires: new Date(Date.now() + 15 * 60 * 1000),
+          },
+        },
+      );
 
       const resetLink = `http://localhost:3000/reset-password/${resetToken}`;
 
@@ -360,13 +332,13 @@
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      user.password = hashedPassword;
-
-      user.resetPasswordToken = null;
-
-      user.resetPasswordExpires = null;
-
-      await user.save();
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: { password: hashedPassword },
+          $unset: { resetPasswordToken: "", resetPasswordExpires: "" },
+        },
+      );
 
       res.json({
         message: "Password reset successful"

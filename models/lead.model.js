@@ -10,6 +10,56 @@ const leadSchema = new mongoose.Schema({
 
   phone: String,
 
+  company: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+
+  address: {
+    street: { type: String, default: "" },
+    city: { type: String, default: "" },
+    state: { type: String, default: "" },
+    country: { type: String, default: "" },
+    zipCode: { type: String, default: "" },
+  },
+
+  industry: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+
+  website: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+
+  budget: {
+    type: Number,
+    default: 0,
+  },
+
+  requirement: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+
+  interestedService: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+
+  expectedClosingDate: Date,
+
+  dealValue: {
+    type: Number,
+    default: 0,
+  },
+
   source: {
     type: String,
     enum: [
@@ -37,6 +87,7 @@ const leadSchema = new mongoose.Schema({
       "proposal_sent",
       "negotiation",
       "won",
+      "converted",
       "lost",
       "follow_up",
       "demo_request",
@@ -44,6 +95,18 @@ const leadSchema = new mongoose.Schema({
       "low_priority"
     ],
     default: "new"
+  },
+
+  priority: {
+    type: String,
+    enum: ["high", "medium", "low"],
+    default: "medium",
+  },
+
+  leadScore: {
+    type: String,
+    enum: ["hot", "warm", "cold"],
+    default: "cold",
   },
 
   assignedManager: {
@@ -56,6 +119,39 @@ const leadSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     default: null
+  },
+
+  assignedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+  },
+
+  assignedDate: Date,
+
+  leadOwner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+  },
+
+  nextFollowUpDate: Date,
+
+  followUpNotes: {
+    type: String,
+    default: "",
+  },
+
+  missedFollowUps: {
+    type: Number,
+    default: 0,
+  },
+
+  tags: [String],
+
+  description: {
+    type: String,
+    default: "",
   },
 
   createdBy: {
@@ -84,6 +180,11 @@ const leadSchema = new mongoose.Schema({
     {
       date: Date,
       note: String,
+      followUpType: {
+        type: String,
+        enum: ["call", "whatsapp", "email", "meeting", "video_call", "demo", "site_visit", "consultation", "task", "other"],
+        default: "call"
+      },
       status: {
         type: String,
         enum: ["pending", "completed", "missed"],

@@ -26,11 +26,25 @@ const getLeadCountForAgent = async (agentId) => {
 // ================= HELPER: GET DETAILED LEAD STATS FOR AGENT =================
 const getAgentLeadStats = async (agentId) => {
   const totalLeads = await Lead.countDocuments({ assignedAgent: agentId });
-  const wonLeads = await Lead.countDocuments({ assignedAgent: agentId, status: "Won" });
-  const lostLeads = await Lead.countDocuments({ assignedAgent: agentId, status: "Lost" });
-  const activeLeads = await Lead.countDocuments({ assignedAgent: agentId, status: "Active" });
-  const inactiveLeads = await Lead.countDocuments({ assignedAgent: agentId, status: "Inactive" });
-  
+  const wonLeads = await Lead.countDocuments({
+    assignedAgent: agentId,
+    status: { $in: ["won", "converted", "Won", "Converted"] },
+  });
+  const lostLeads = await Lead.countDocuments({
+    assignedAgent: agentId,
+    status: { $in: ["lost", "not_interested", "Lost", "Not Interested"] },
+  });
+  const activeLeads = await Lead.countDocuments({
+    assignedAgent: agentId,
+    status: {
+      $nin: ["won", "converted", "Won", "Converted", "lost", "not_interested", "Lost", "Not Interested"],
+    },
+  });
+  const inactiveLeads = await Lead.countDocuments({
+    assignedAgent: agentId,
+    status: { $in: ["lost", "not_interested", "Lost", "Not Interested"] },
+  });
+
   return {
     totalLeads,
     wonLeads,
@@ -65,7 +79,7 @@ exports.getManagers = async (req, res) => {
           agentsCount,
           assignedLeadsCount,
         };
-      })
+      }),
     );
 
     return res.status(200).json({
@@ -152,13 +166,14 @@ exports.getAgents = async (req, res) => {
           role: agent.role,
           status: agent.status,
           managerId: agent.managerId,
+          createdAt: agent.createdAt,
           assignedLeadsCount: leadStats.totalLeads,
           wonLeads: leadStats.wonLeads,
           lostLeads: leadStats.lostLeads,
           activeLeadsCount: leadStats.activeLeads,
           inactiveLeadsCount: leadStats.inactiveLeads,
         };
-      })
+      }),
     );
 
     return res.status(200).json({
@@ -225,14 +240,73 @@ exports.getAgentById = async (req, res) => {
 // ================= GET MY AGENTS =================
 exports.getMyAgents = async (req, res) => {
   try {
+    const Lead = require("../models/lead.model");
+
     const agents = await User.find({
       role: "agent",
       managerId: req.user.id,
-    }).select("-password -resetPasswordToken -resetPasswordExpires");
+    })
+      .select("-password -resetPasswordToken -resetPasswordExpires")
+      .lean();
+
+    // Attach lead statistics for each agent
+    const agentsWithStats = await Promise.all(
+      agents.map(async (agent) => {
+        const [
+          totalLeads,
+          convertedLeads,
+          activeLeads,
+          pendingLeads,
+          lostLeads,
+        ] = await Promise.all([
+          Lead.countDocuments({ assignedAgent: agent._id }),
+          Lead.countDocuments({
+            assignedAgent: agent._id,
+            status: { $in: ["won", "qualified"] },
+          }),
+          Lead.countDocuments({
+            assignedAgent: agent._id,
+            status: {
+              $in: [
+                "new",
+                "contacted",
+                "interested",
+                "follow_up",
+                "demo_request",
+                "meeting_schedule",
+                "proposal_sent",
+                "negotiation",
+              ],
+            },
+          }),
+          Lead.countDocuments({
+            assignedAgent: agent._id,
+            status: "follow_up",
+          }),
+          Lead.countDocuments({
+            assignedAgent: agent._id,
+            status: { $in: ["lost", "not_interested"] },
+          }),
+        ]);
+
+        const conversionRate =
+          totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0;
+
+        return {
+          ...agent,
+          totalLeads,
+          convertedLeads,
+          activeLeads,
+          pendingLeads,
+          lostLeads,
+          conversionRate,
+        };
+      }),
+    );
 
     return res.status(200).json({
       success: true,
-      data: agents,
+      data: agentsWithStats,
     });
   } catch (err) {
     return res.status(500).json({
@@ -261,8 +335,18 @@ exports.assignAgentToManager = async (req, res) => {
     const agent = await User.findById(agentId);
     const manager = await User.findById(managerId);
 
-    console.log("Found agent:", agent ? agent.name : null, "role:", agent ? agent.role : null);
-    console.log("Found manager:", manager ? manager.name : null, "role:", manager ? manager.role : null);
+    console.log(
+      "Found agent:",
+      agent ? agent.name : null,
+      "role:",
+      agent ? agent.role : null,
+    );
+    console.log(
+      "Found manager:",
+      manager ? manager.name : null,
+      "role:",
+      manager ? manager.role : null,
+    );
 
     if (!agent || agent.role !== "agent") {
       return res.status(400).json({
@@ -281,11 +365,15 @@ exports.assignAgentToManager = async (req, res) => {
 
     // Validation: Check if agent is already assigned to a different manager
     // Allow null managerId to unassign agent
-    if (managerId && agent.managerId && agent.managerId.toString() !== managerId) {
+    if (
+      managerId &&
+      agent.managerId &&
+      agent.managerId.toString() !== managerId
+    ) {
       const currentManager = await User.findById(agent.managerId);
       return res.status(400).json({
         success: false,
-        message: `Agent is already assigned to manager "${currentManager ? currentManager.name : 'Unknown'}". Please reassign from current manager first.`,
+        message: `Agent is already assigned to manager "${currentManager ? currentManager.name : "Unknown"}". Please reassign from current manager first.`,
       });
     }
 
@@ -293,10 +381,15 @@ exports.assignAgentToManager = async (req, res) => {
     const updatedAgent = await User.findByIdAndUpdate(
       agentId,
       { managerId: managerId },
-      { new: true, runValidators: false }
+      { new: true, runValidators: false },
     );
 
-    console.log("Agent assigned successfully:", updatedAgent.name, "->", manager.name);
+    console.log(
+      "Agent assigned successfully:",
+      updatedAgent.name,
+      "->",
+      manager.name,
+    );
 
     return res.status(200).json({
       success: true,
@@ -343,7 +436,7 @@ exports.updateAgentStatus = async (req, res) => {
     const updatedAgent = await User.findByIdAndUpdate(
       agentId,
       { status: status },
-      { new: true, runValidators: false }
+      { new: true, runValidators: false },
     );
 
     console.log("Agent status updated:", updatedAgent.name, "->", status);
@@ -379,9 +472,9 @@ exports.updateManager = async (req, res) => {
       });
     }
 
-    if (name) manager.name = name;
-    if (email) manager.email = email;
-    if (phone) manager.phone = phone;
+    if (name !== undefined) manager.name = String(name).trim();
+    if (email !== undefined) manager.email = String(email).trim().toLowerCase();
+    if (phone !== undefined) manager.phone = String(phone).trim();
 
     await manager.save();
 
@@ -429,7 +522,7 @@ exports.updateManagerStatus = async (req, res) => {
     const updatedManager = await User.findByIdAndUpdate(
       managerId,
       { status: status },
-      { new: true, runValidators: false }
+      { new: true, runValidators: false },
     );
 
     console.log("Manager status updated:", updatedManager.name, "->", status);
@@ -453,7 +546,13 @@ exports.updateAgent = async (req, res) => {
   try {
     const { name, email, phone, managerId } = req.body;
 
-    console.log("Update agent request:", { id: req.params.id, name, email, phone, managerId });
+    console.log("Update agent request:", {
+      id: req.params.id,
+      name,
+      email,
+      phone,
+      managerId,
+    });
 
     const agent = await User.findOne({
       _id: req.params.id,
@@ -484,8 +583,8 @@ exports.updateAgent = async (req, res) => {
           $or: [
             { status: "active" },
             { status: { $exists: false } },
-            { status: null }
-          ]
+            { status: null },
+          ],
         });
 
         console.log("Manager lookup result:", manager ? "Found" : "Not found");
@@ -495,7 +594,7 @@ exports.updateAgent = async (req, res) => {
           const inactiveManager = await User.findOne({
             _id: managerId,
             role: "manager",
-            status: "inactive"
+            status: "inactive",
           });
 
           if (inactiveManager) {
@@ -575,14 +674,6 @@ exports.deleteAgent = async (req, res) => {
     });
   }
 };
-
-
-
-
-
-
-
-
 
 // const User = require("../models/user");
 // const Lead = require("../models/lead.model");
@@ -707,7 +798,6 @@ exports.deleteAgent = async (req, res) => {
 //   }
 // };
 
-
 // // ================= GET MY AGENTS =================
 // exports.getMyAgents = async (req, res) => {
 //   try {
@@ -728,7 +818,6 @@ exports.deleteAgent = async (req, res) => {
 //     });
 //   }
 // };
-
 
 // // ================= ASSIGN AGENT TO MANAGER =================
 // exports.assignAgentToManager = async (req, res) => {
@@ -770,7 +859,6 @@ exports.deleteAgent = async (req, res) => {
 //   }
 // };
 
-
 // // ================= UPDATE MANAGER =================
 // exports.updateManager = async (req, res) => {
 //   try {
@@ -807,7 +895,6 @@ exports.deleteAgent = async (req, res) => {
 //     });
 //   }
 // };
-
 
 // // ================= UPDATE AGENT =================
 // exports.updateAgent = async (req, res) => {
@@ -862,5 +949,3 @@ exports.deleteAgent = async (req, res) => {
 //     });
 //   }
 // };
-
-
