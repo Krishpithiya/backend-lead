@@ -1,5 +1,16 @@
 require("dotenv").config();
 
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction) {
+  const noop = () => undefined;
+  ["log", "debug", "trace", "table", "group", "groupCollapsed", "groupEnd"].forEach(
+    (method) => {
+      console[method] = noop;
+    }
+  );
+}
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -35,7 +46,9 @@ app.disable("x-powered-by");
 app.use(helmet());
 
 // Logging
-app.use(morgan("dev"));
+if (!isProduction) {
+  app.use(morgan("dev"));
+}
 
 /* ================= CORS ================= */
 
@@ -61,7 +74,7 @@ if (!process.env.MONGO_URL) {
 
 mongoose
   .connect(process.env.MONGO_URL, { serverSelectionTimeoutMS: 8000 })
-  .then(() => console.log("✅ MongoDB connected"))
+  .then(() => console.info("✅ MongoDB connected"))
   .catch((err) => {
     console.error("❌ MongoDB connection error:", err.message);
     console.error("Server is still running; database-backed APIs will recover when MongoDB is reachable.");
@@ -115,7 +128,7 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.info(`🚀 Server running on port ${PORT}`);
   ensureFollowUpIndexes().catch((error) =>
     console.error("Follow-up index repair failed:", error.message)
   );
@@ -129,10 +142,10 @@ try {
   });
   app.set("io", io);
   io.on("connection", (socket) => socket.emit("task:connected", { connected: true }));
-  console.log("Socket.io task channel enabled");
+  console.info("Socket.io task channel enabled");
 } catch {
   app.set("io", null);
-  console.log("Socket.io not installed; task REST APIs are running without realtime channel");
+  console.warn("Socket.io not installed; task REST APIs are running without realtime channel");
 }
 
 

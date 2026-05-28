@@ -42,6 +42,14 @@ router.put(
   leadController.updateLead
 );
 
+// ================= DELETE LEAD =================
+router.delete(
+  "/:id",
+  verifyToken,
+  authorizeRoles("admin"),
+  leadController.deleteLead
+);
+
 
 
 // ================= 🔥 NEW APIs =================
